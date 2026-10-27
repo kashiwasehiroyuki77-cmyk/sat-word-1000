@@ -183,7 +183,8 @@ details.settings .controls{margin-top:10px}
         <option value="5">5語</option><option value="10">10語</option><option value="15">15語</option><option value="20">20語</option>
       </select>
     </div>
-    <p class="hint" style="margin:8px 0">学習の記録はこの端末のブラウザに保存されます。<br>アプリの版：2026-10-28（順番／シャッフル切替）</p>
+    <label class="controls" style="margin-top:10px;gap:6px"><input type="checkbox" id="sameInit"> クイズの選択肢を正解と同じ頭文字の単語にする（難しくなります）</label>
+    <p class="hint" style="margin:8px 0">学習の記録はこの端末のブラウザに保存されます。<br>アプリの版：2026-10-28b（選択肢ランダム）</p>
     <div class="controls">
       <button class="btn" id="resetBtn">記録をすべて消す</button>
       <span id="resetConfirm" hidden>本当に消しますか？ <button class="btn bad" id="resetYes">消す</button> <button class="btn" id="resetNo">やめる</button></span>
@@ -218,7 +219,7 @@ function today(){ const d=new Date(); return Math.floor((d.getTime()-d.getTimezo
 
 /* ---------- 保存データ ---------- */
 const KEY="sat1000-v2";
-let S = { cards:{}, days:[], newPer:10, introduced:{} , doneToday:{}, todayOrder:"shuf", quizOrder:"shuf", quizPos:{} };
+let S = { cards:{}, days:[], newPer:10, introduced:{} , doneToday:{}, todayOrder:"shuf", quizOrder:"shuf", quizPos:{}, sameInitial:false };
 try{
   const s=JSON.parse(localStorage.getItem(KEY)||"null");
   if(s) S=Object.assign(S,s);
@@ -406,9 +407,12 @@ function renderQ(){
   const x=qList[qi];
   // 選択肢は正解と同じ頭文字・同じ品詞の単語を優先（頭文字で答えがわからないように）
   const ok=y=>y.id!==x.id&&y.m!==x.m;
-  const tiers=[
+  // 標準：全単語から同じ品詞をランダムに。設定で「同じ頭文字」にもできる
+  const tiers = S.sameInitial ? [
     WORDS.filter(y=>ok(y)&&y.w[0]===x.w[0]&&y.p===x.p),
     WORDS.filter(y=>ok(y)&&y.w[0]===x.w[0]),
+    WORDS.filter(y=>ok(y)&&y.p===x.p),
+    WORDS.filter(ok)] : [
     WORDS.filter(y=>ok(y)&&y.p===x.p),
     WORDS.filter(ok)];
   let others=[];
@@ -474,6 +478,8 @@ $("resetNo").onclick=()=>{ $("resetConfirm").hidden=true; $("resetBtn").hidden=f
 $("resetYes").onclick=()=>{ S={cards:{},days:[],newPer:S.newPer,introduced:{},doneToday:{},todayOrder:S.todayOrder,quizOrder:S.quizOrder,quizPos:{}}; save(); $("resetConfirm").hidden=true; $("resetBtn").hidden=false; buildToday(); show("today"); };
 
 const nj=document.getElementById("nojs"); if(nj) nj.hidden=true;
+$("sameInit").checked=!!S.sameInitial;
+$("sameInit").onchange=()=>{ S.sameInitial=$("sameInit").checked; save(); if(!$("view-quiz").hidden) startQuiz(); };
 function setSeg(id,val){ document.querySelectorAll("#"+id+" button").forEach(b=>b.setAttribute("aria-pressed",b.dataset.o===val)); }
 setSeg("todaySeg",S.todayOrder); setSeg("quizSeg",S.quizOrder);
 document.querySelectorAll("#todaySeg button").forEach(b=>b.onclick=()=>{ if(S.todayOrder===b.dataset.o) return; S.todayOrder=b.dataset.o; save(); setSeg("todaySeg",S.todayOrder); buildToday(); });
