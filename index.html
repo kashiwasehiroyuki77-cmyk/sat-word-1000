@@ -37,6 +37,9 @@ nav.tabs button[aria-selected="true"]{background:var(--accent);color:var(--paper
 .chip{font-size:.82rem;border:1px solid var(--line);background:var(--paper);border-radius:999px;padding:2px 10px;font-variant-numeric:tabular-nums}
 .chip b{font-family:var(--f-mono)}
 .chip.rev b{color:var(--warn)} .chip.new b{color:var(--accent)} .chip.done b{color:var(--good)}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:999px;overflow:hidden;background:var(--paper)}
+.seg button{font:inherit;font-size:.8rem;border:0;background:none;color:var(--muted);padding:3px 12px;cursor:pointer}
+.seg button[aria-pressed="true"]{background:var(--accent);color:var(--paper)}
 .sbar{height:6px;background:var(--line);border-radius:3px;overflow:hidden}
 .sbar i{display:block;height:100%;background:var(--good);width:0;transition:width .25s}
 .card{background:var(--paper);border:1px solid var(--line);border-radius:6px;min-height:min(56vh,380px);padding:40px 20px 24px;position:relative;cursor:pointer;
@@ -132,13 +135,17 @@ details.settings .controls{margin-top:10px}
   </nav>
 
   <section id="view-today">
-    <div class="plan" id="plan" style="margin-bottom:8px"></div>
+    <div class="controls" style="justify-content:space-between;margin-bottom:8px">
+      <div class="plan" id="plan"></div>
+      <div class="seg" role="group" aria-label="出る順番" id="todaySeg"><button data-o="seq">順番</button><button data-o="shuf">シャッフル</button></div>
+    </div>
     <div class="sbar" style="margin-bottom:12px"><i id="sbar"></i></div>
     <div id="todayBody"></div>
   </section>
 
   <section id="view-quiz" hidden>
     <div class="controls" style="margin-bottom:10px">
+      <div class="seg" role="group" aria-label="出題の順番" id="quizSeg"><button data-o="seq">順番</button><button data-o="shuf">シャッフル</button></div>
       <select id="qrange" aria-label="出題範囲">
         <option value="learned">学習した単語から</option>
         <option value="all">全1000語から</option>
@@ -176,7 +183,7 @@ details.settings .controls{margin-top:10px}
         <option value="5">5語</option><option value="10">10語</option><option value="15">15語</option><option value="20">20語</option>
       </select>
     </div>
-    <p class="hint" style="margin:8px 0">学習の記録はこの端末のブラウザに保存されます。<br>アプリの版：2026-10-26b（選択肢は同じ頭文字）</p>
+    <p class="hint" style="margin:8px 0">学習の記録はこの端末のブラウザに保存されます。<br>アプリの版：2026-10-28（順番／シャッフル切替）</p>
     <div class="controls">
       <button class="btn" id="resetBtn">記録をすべて消す</button>
       <span id="resetConfirm" hidden>本当に消しますか？ <button class="btn bad" id="resetYes">消す</button> <button class="btn" id="resetNo">やめる</button></span>
@@ -211,7 +218,7 @@ function today(){ const d=new Date(); return Math.floor((d.getTime()-d.getTimezo
 
 /* ---------- 保存データ ---------- */
 const KEY="sat1000-v2";
-let S = { cards:{}, days:[], newPer:10, introduced:{} , doneToday:{} };
+let S = { cards:{}, days:[], newPer:10, introduced:{} , doneToday:{}, todayOrder:"shuf", quizOrder:"shuf", quizPos:{} };
 try{
   const s=JSON.parse(localStorage.getItem(KEY)||"null");
   if(s) S=Object.assign(S,s);
@@ -270,13 +277,15 @@ function speak(word){
 let queue=[], total=0, done=0, cur=null, revealed=false, again=new Set();
 function buildToday(extraNew){
   const t=today();
-  const due = WORDS.filter(x=>S.cards[x.id] && S.cards[x.id].d<=t)
-    .sort((a,b)=>S.cards[a.id].d-S.cards[b.id].d).map(x=>({id:x.id,kind:"rev"}));
+  const seq = S.todayOrder==="seq";
+  // 順番：単語番号（A→Z）順 / シャッフル：ばらばら
+  let due = WORDS.filter(x=>S.cards[x.id] && S.cards[x.id].d<=t).map(x=>({id:x.id,kind:"rev"}));
+  if(!seq) due = shuffle(due);
   const introducedToday = S.introduced[t]||0;
   const want = Math.max(0, S.newPer - introducedToday) + (extraNew||0);
-  const fresh = NEW_ORDER.filter(x=>!S.cards[x.id]).slice(0,want).map(x=>({id:x.id,kind:"new"}));
+  const fresh = (seq?WORDS:NEW_ORDER).filter(x=>!S.cards[x.id]).slice(0,want).map(x=>({id:x.id,kind:"new"}));
   // 復習を先に、新出はあとに（新出は覚えたての単語と混ざらないように）
-  queue=[...due,...fresh]; total=queue.length; done=0; again=new Set();
+  queue=[...due,...(seq?fresh:shuffle(fresh))]; total=queue.length; done=0; again=new Set();
   next();
 }
 function renderPlan(){
@@ -374,7 +383,17 @@ function quizPool(){
   if($("qrange").value==="all") return WORDS;
   return WORDS.filter(x=>S.cards[x.id]);
 }
-function startQuiz(){ qList=shuffle(quizPool()).slice(0,10); qi=0; qScore=0; qMiss=[]; renderQ(); }
+function startQuiz(){
+  const pool=quizPool();
+  if(S.quizOrder==="seq" && pool.length){
+    // 順番：単語番号順に、前回の続きから10問
+    const key=$("qrange").value; let pos=(S.quizPos&&S.quizPos[key])||0;
+    if(pos>=pool.length) pos=0;
+    qList=pool.slice(pos,pos+10);
+    if(!S.quizPos) S.quizPos={}; S.quizPos[key]=pos+qList.length>=pool.length?0:pos+qList.length; save();
+  }else qList=shuffle(pool).slice(0,10);
+  qi=0; qScore=0; qMiss=[]; renderQ();
+}
 function renderQ(){
   const P=$("quizPanel"), mode=$("qmode").value;
   if(!qList.length){ P.innerHTML='<div class="empty">まだ学習した単語がありません。<br>「今日の学習」を進めるか、「全1000語から」を選んでください。</div>'; return; }
@@ -452,9 +471,13 @@ $("newPer").value=String(S.newPer);
 $("newPer").onchange=()=>{ S.newPer=+$("newPer").value; save(); buildToday(); };
 $("resetBtn").onclick=()=>{ $("resetConfirm").hidden=false; $("resetBtn").hidden=true; };
 $("resetNo").onclick=()=>{ $("resetConfirm").hidden=true; $("resetBtn").hidden=false; };
-$("resetYes").onclick=()=>{ S={cards:{},days:[],newPer:S.newPer,introduced:{},doneToday:{}}; save(); $("resetConfirm").hidden=true; $("resetBtn").hidden=false; buildToday(); show("today"); };
+$("resetYes").onclick=()=>{ S={cards:{},days:[],newPer:S.newPer,introduced:{},doneToday:{},todayOrder:S.todayOrder,quizOrder:S.quizOrder,quizPos:{}}; save(); $("resetConfirm").hidden=true; $("resetBtn").hidden=false; buildToday(); show("today"); };
 
 const nj=document.getElementById("nojs"); if(nj) nj.hidden=true;
+function setSeg(id,val){ document.querySelectorAll("#"+id+" button").forEach(b=>b.setAttribute("aria-pressed",b.dataset.o===val)); }
+setSeg("todaySeg",S.todayOrder); setSeg("quizSeg",S.quizOrder);
+document.querySelectorAll("#todaySeg button").forEach(b=>b.onclick=()=>{ if(S.todayOrder===b.dataset.o) return; S.todayOrder=b.dataset.o; save(); setSeg("todaySeg",S.todayOrder); buildToday(); });
+document.querySelectorAll("#quizSeg button").forEach(b=>b.onclick=()=>{ if(S.quizOrder===b.dataset.o) return; S.quizOrder=b.dataset.o; save(); setSeg("quizSeg",S.quizOrder); startQuiz(); });
 buildToday();
 show("today");
 </script>
